@@ -155,13 +155,16 @@ def handle_audio_message(event):
             is_successful, response, error_message = model_management[user_id].audio_transcriptions(input_audio_path, 'whisper-1')
             if not is_successful:
                 raise Exception(error_message)
-            memory.append(user_id, 'user', response['text'])
+            speech_to_text_content = response['text']
+            if speech_to_text_content.lower().startswith('check'):
+                speech_to_text_content = f"{speech_to_text_content[6:]} (please make my sentence more natural and correct any grammatical errors)"
+            memory.append(user_id, 'user', speech_to_text_content)
             is_successful, response, error_message = model_management[user_id].chat_completions(memory.get(user_id), 'gpt-3.5-turbo')
             if not is_successful:
                 raise Exception(error_message)
             role, response = get_role_and_content(response)
             memory.append(user_id, role, response)
-            msg = TextSendMessage(text=response)
+            msg = TextSendMessage(text=f"your speech:\n{speech_to_text_content}\n===\nresponse:\n{response}")
     except ValueError:
         msg = TextSendMessage(text='請先註冊你的 API Token，格式為 /註冊 [API TOKEN]')
     except KeyError:
