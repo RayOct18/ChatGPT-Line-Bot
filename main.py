@@ -188,7 +188,7 @@ def handle_audio_message(reply_token, user_id, message_id):
                 raise Exception(error_message)
             role, response = get_role_and_content(response)
             memory.append(user_id, role, response)
-            msg = TextSendMessage(text=f"your speech:\n{speech_to_text_content}\n===\nresponse:\n{response}")
+            msg = TextSendMessage(text=f"you:\n{speech_to_text_content}\n===\nresponse:\n{response}")
     except ValueError:
         msg = TextSendMessage(text='請先註冊你的 API Token，格式為 /註冊 [API TOKEN]')
     except KeyError:
