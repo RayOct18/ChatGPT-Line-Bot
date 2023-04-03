@@ -85,7 +85,10 @@ def handle_text_message(reply_token, user_id, text):
                      "\n/清除\n👉 當前每一次都會紀錄最後兩筆歷史紀錄，這個指令能夠清除歷史訊息\n" + \
                      "\n/圖像 + Prompt\n👉 會調用 DALL∙E 2 Model，以文字生成圖像\n" + \
                      "\n語音輸入\n👉 會調用 Whisper 模型，先將語音轉換成文字，再調用 ChatGPT 以文字回覆\n" + \
-                     "\n其他文字輸入\n👉 調用 ChatGPT 以文字回覆\n"
+                     "\n其他文字輸入\n👉 調用 ChatGPT 以文字回覆\n" + \
+                     "\n/get_keyword\n👉 取得所有快捷關鍵字內容\n" + \
+                     "\n/add_keyword + key content\n👉 新增快捷關鍵字內容，之後內容開頭如果是關鍵字，則自動帶入對應的內容\n" + \
+                     "\n/remove_keyword + key\n👉 刪除快捷關鍵字\n"
                      )
             logger.info(msg)
 
@@ -100,6 +103,28 @@ def handle_text_message(reply_token, user_id, text):
         elif text.startswith('/清除'):
             memory.remove(user_id)
             msg = TextSendMessage(text='歷史訊息清除成功')
+        
+        elif text.startswith('/get_keyword'):
+            shortcut_keywords = memory.shortcut_keywords[user_id]
+            msg = TextSendMessage(text=f'目前快捷關鍵字：{dict(shortcut_keywords)}')
+
+        elif text.startswith('/add_keyword'):
+            shortcut_pairs = text[12:].strip().split()
+            if len(shortcut_pairs) < 2:
+                msg = '請輸入 /add_keyword key value'
+            else:
+                shortcut_keyword = shortcut_pairs[0].lower()
+                shortcut_value = ' '.join(shortcut_pairs[1:])
+                memory.shortcut_keywords[user_id][shortcut_keyword] = shortcut_value
+                msg = TextSendMessage(text=f'新增快捷關鍵字 "{shortcut_keyword}": "{shortcut_value}" 成功，' +\
+                                      f'之後輸入文字 "!{shortcut_keyword}" 就會自動帶入 "{shortcut_value}"，' +\
+                                      '如果是使用語音輸入，則在開頭說出關鍵字')
+            
+        elif text.startswith('/remove_keyword'):
+            shortcut_keyword = text[14:].strip().lower()
+            if shortcut_keyword in memory.shortcut_keywords[user_id]:
+                del memory.shortcut_keywords[user_id][shortcut_keyword]
+                msg = TextSendMessage(text=f'刪除快捷關鍵字 "{shortcut_keyword}" 成功')
 
         elif text.startswith('/圖像'):
             prompt = text[3:].strip()
@@ -116,6 +141,11 @@ def handle_text_message(reply_token, user_id, text):
 
         else:
             user_model = model_management[user_id]
+            if text.startswith(f'!'):
+                text_split = text.split()
+                shortcut_keyword = text_split[0][1:].lower()
+                if shortcut_keyword in memory.shortcut_keywords[user_id]:
+                    text = memory.shortcut_keywords[user_id][shortcut_keyword] + '\n' + ' '.join(text_split[1:])
             memory.append(user_id, 'user', text)
             url = website.get_url_from_text(text)
             if url:
@@ -180,8 +210,10 @@ def handle_audio_message(reply_token, user_id, message_id):
             if not is_successful:
                 raise Exception(error_message)
             speech_to_text_content = response['text']
-            if speech_to_text_content.lower().startswith('check'):
-                speech_to_text_content = f"{speech_to_text_content[6:]} (please make my sentence more natural and correct any grammatical errors)"
+            text_split = speech_to_text_content.split()
+            shortcut_keyword = text_split[0].lower().replace(',', '').replace('.', '')
+            if shortcut_keyword in memory.shortcut_keywords[user_id]:
+                speech_to_text_content = memory.shortcut_keywords[user_id][shortcut_keyword] + '\n' + ' '.join(text_split[1:])
             memory.append(user_id, 'user', speech_to_text_content)
             is_successful, response, error_message = model_management[user_id].chat_completions(memory.get(user_id), 'gpt-3.5-turbo')
             if not is_successful:

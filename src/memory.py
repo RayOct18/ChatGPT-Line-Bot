@@ -1,5 +1,6 @@
 from typing import Dict
 from collections import defaultdict
+from src.logger import logger
 
 
 class MemoryInterface:
@@ -19,6 +20,9 @@ class Memory(MemoryInterface):
         self.system_messages = defaultdict(str)
         self.default_system_message = system_message
         self.memory_message_count = memory_message_count
+        self.system_messages = defaultdict(str)
+        self.shortcut_keywords = defaultdict(lambda: defaultdict(str))
+
 
     def _initialize(self, user_id: str):
         self.storage[user_id] = [{
@@ -41,7 +45,9 @@ class Memory(MemoryInterface):
             'role': role,
             'content': content
         })
+        logger.debug(f"memory length: {len(self.storage[user_id])}")
         self._drop_message(user_id)
+        logger.debug(f"memory length after dropping: {len(self.storage[user_id])}")
 
     def get(self, user_id: str) -> str:
         return self.storage[user_id]
