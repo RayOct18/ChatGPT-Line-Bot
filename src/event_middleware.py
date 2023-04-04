@@ -25,8 +25,9 @@ def get_event_id(event):
     return id
 
 
-def event_handler(func):
+def event_middleware(func):
     def wrapper(event):
+        logger.info(f"Received event: {event}")
         try:
             reply_token = event.reply_token
             # If the event is a join event, the user ID is not available.
@@ -34,12 +35,9 @@ def event_handler(func):
                 return func(reply_token)
             # If the event is a message event, the message type can be text or audio.
             id = get_event_id(event)
-            if event.message.type == "text":
-                text = event.message.text.strip()
-                return func(reply_token, id, text)
-            elif event.message.type == "audio":
-                message_id = event.message.id
-                return func(reply_token, id, message_id)
+            message = event.message
+            if event.message.type in ("text", "audio", "file"):
+                return func(reply_token, id, message)
             else:
                 raise RuntimeError(f"Unsupported message type {event.message.type}")
         except Exception as e:
