@@ -10,4 +10,4 @@ RUN pip3 install -r requirements.txt
 COPY ./ /ChatGPT-Line-Bot
 WORKDIR /ChatGPT-Line-Bot
 
-CMD ["python3", "main.py"]
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "--worker-class", "gevent" "-w", "2", "-t", "8", "main:app"]
