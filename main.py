@@ -20,7 +20,6 @@ from scipy.io import wavfile
 from src.models import OpenAIModel
 from src.memory import Memory
 from src.logger import logger
-from src.storage import Storage, FileStorage, MongoStorage
 from src.utils import get_role_and_content
 from src.service.youtube import Youtube, YoutubeTranscriptReader
 from src.service.website import Website, WebsiteReader
@@ -32,14 +31,12 @@ load_dotenv(".env")
 app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
-storage = None
 youtube = Youtube(step=4)
 website = Website()
+mongodb.connect_to_database()
 
 
-memory = Memory(system_message=os.getenv("SYSTEM_MESSAGE"), memory_message_count=2)
-model_management = {}
-api_keys = {}
+memory = Memory(mongodb)
 
 
 class MessageEventHandler:
@@ -57,7 +54,7 @@ class MessageEventHandler:
             except KeyError:
                 msg = TextSendMessage(text="請先註冊 Token，格式為 /註冊 sk-xxxxx")
             except Exception as e:
-                memory.remove(user_id)
+                memory.clean_storage(user_id)
                 if str(e).startswith("Incorrect API key provided"):
                     msg = TextSendMessage(text="OpenAI API Token 有誤，請重新註冊。")
                 elif str(e).startswith(
@@ -70,6 +67,7 @@ class MessageEventHandler:
 
 
 def process_audio_message(user_id, message):
+    model = OpenAIModel(api_key=memory.get_api_key(user_id))
     audio_content = line_bot_api.get_message_content(message.id)
     input_audio_path = f"{str(uuid.uuid4())}.m4a"
     with open(input_audio_path, "wb") as fd:
@@ -85,28 +83,27 @@ def process_audio_message(user_id, message):
     reduced_noise = nr.reduce_noise(y=data, sr=rate, stationary=True)
     wavfile.write(wav_path, rate, reduced_noise)
 
-    is_successful, response, error_message = model_management[
-        user_id
-    ].audio_transcriptions(wav_path, "whisper-1")
+    is_successful, response, error_message = model.audio_transcriptions(
+        wav_path, "whisper-1"
+    )
     if not is_successful:
         raise Exception(error_message)
     speech_to_text_content = response["text"]
     text_split = speech_to_text_content.split()
     shortcut_keyword = text_split[0].lower().replace(",", "").replace(".", "")
-    if shortcut_keyword in memory.shortcut_keywords[user_id]:
+    shortcut_keywords = memory.get_shortcut_keywords(user_id)
+    if shortcut_keyword in shortcut_keywords:
         speech_to_text_content = (
-            memory.shortcut_keywords[user_id][shortcut_keyword]
-            + "\n"
-            + " ".join(text_split[1:])
+            shortcut_keywords[shortcut_keyword] + "\n" + " ".join(text_split[1:])
         )
-    memory.append(user_id, "user", speech_to_text_content)
-    is_successful, response, error_message = model_management[user_id].chat_completions(
-        memory.get(user_id), "gpt-3.5-turbo"
+    memory.append_storage(user_id, "user", speech_to_text_content)
+    is_successful, response, error_message = model.chat_completions(
+        memory.get_storage(user_id), "gpt-3.5-turbo"
     )
     if not is_successful:
         raise Exception(error_message)
     role, response = get_role_and_content(response)
-    memory.append(user_id, role, response)
+    memory.append_storage(user_id, role, response)
     msg = TextSendMessage(
         text=f"you:\n{speech_to_text_content}\n===\nresponse:\n{response}"
     )
@@ -118,21 +115,20 @@ def process_audio_message(user_id, message):
 def process_text_message(user_id, message):
     text = message.text.strip()
     logger.info(f"{user_id}: {text}")
+    model = OpenAIModel(api_key=memory.get_api_key(user_id))
     if text.startswith("/註冊"):
         api_key = text[3:].strip()
-        model = OpenAIModel(api_key=api_key)
+        memory.add_api_key(user_id, api_key)
+        model = OpenAIModel(api_key=memory.get_api_key(user_id))
         is_successful, _, _ = model.check_token_valid()
         if not is_successful:
             raise PermissionError("Invalid API token")
-        model_management[user_id] = model
-        storage.save({user_id: api_key})
         msg = TextSendMessage(text="Token 有效，註冊成功")
 
     elif text.startswith("/目前金鑰"):
-        if user_id in model_management:
-            msg = TextSendMessage(
-                text=f"目前使用 Token {model_management[user_id].api_key}"
-            )
+        api_key = memory.get_api_key(user_id)
+        if api_key:
+            msg = TextSendMessage(text=f"目前使用 Token {api_key}")
         else:
             msg = TextSendMessage(text="尚未註冊")
 
@@ -150,24 +146,21 @@ def process_text_message(user_id, message):
             + "\n/add_keyword + key content\n👉 新增快捷關鍵字內容，之後內容開頭如果是關鍵字，則自動帶入對應的內容\n"
             + "\n/remove_keyword + key\n👉 刪除快捷關鍵字\n"
         )
-        logger.info(msg)
 
     elif text.startswith("/系統訊息"):
         memory.change_system_message(user_id, text[5:].strip())
         msg = TextSendMessage(text="輸入成功")
 
     elif text.startswith("/目前系統訊息"):
-        system_message = memory.system_messages.get(user_id) or os.getenv(
-            "SYSTEM_MESSAGE"
-        )
+        system_message = memory.get_system_message(user_id)
         msg = TextMessage(text=f"目前系統訊息：{system_message}")
 
     elif text.startswith("/清除"):
-        memory.remove(user_id)
+        memory.clean_storage(user_id)
         msg = TextSendMessage(text="歷史訊息清除成功")
 
     elif text.startswith("/get_keyword"):
-        shortcut_keywords = memory.shortcut_keywords[user_id]
+        shortcut_keywords = memory.get_shortcut_keywords(user_id)
         msg = TextSendMessage(text=f"目前快捷關鍵字：{dict(shortcut_keywords)}")
 
     elif text.startswith("/add_keyword"):
@@ -175,9 +168,12 @@ def process_text_message(user_id, message):
         if len(shortcut_pairs) < 2:
             msg = "請輸入 /add_keyword key value"
         else:
+            shortcut_keywords = memory.get_shortcut_keywords(user_id)
             shortcut_keyword = shortcut_pairs[0].lower()
             shortcut_value = " ".join(shortcut_pairs[1:])
-            memory.shortcut_keywords[user_id][shortcut_keyword] = shortcut_value
+
+            shortcut_keywords[shortcut_keyword] = shortcut_value
+            memory.change_shortcut_keywords(user_id, shortcut_keywords)
             msg = TextSendMessage(
                 text=f'新增快捷關鍵字 "{shortcut_keyword}": "{shortcut_value}" 成功，'
                 + f'之後輸入文字 "!{shortcut_keyword}" 就會自動帶入 "{shortcut_value}"，'
@@ -185,25 +181,26 @@ def process_text_message(user_id, message):
             )
 
     elif text.startswith("/remove_keyword"):
-        shortcut_keyword = text[14:].strip().lower()
-        if shortcut_keyword in memory.shortcut_keywords[user_id]:
-            del memory.shortcut_keywords[user_id][shortcut_keyword]
+        shortcut_keyword = text[16:].strip().lower()
+        shortcut_keywords = mongodb.find_one(user_id, "shortcut_keywords") or {}
+        if shortcut_keyword in shortcut_keywords:
+            shortcut_keywords.pop(shortcut_keyword)
+            memory.change_shortcut_keywords(user_id, shortcut_keywords)
             msg = TextSendMessage(text=f'刪除快捷關鍵字 "{shortcut_keyword}" 成功')
+        else:
+            msg = TextSendMessage(text=f'快捷關鍵字 "{shortcut_keyword}" 不存在')
 
     elif text.startswith("/圖像"):
         prompt = text[3:].strip()
-        memory.append(user_id, "user", prompt)
-        is_successful, response, error_message = model_management[
-            user_id
-        ].image_generations(prompt)
+        memory.append_storage(user_id, "user", prompt)
+        is_successful, response, error_message = model.image_generations(prompt)
         if not is_successful:
             raise Exception(error_message)
         url = response["data"][0]["url"]
         msg = ImageSendMessage(original_content_url=url, preview_image_url=url)
-        memory.append(user_id, "assistant", url)
+        memory.append_storage(user_id, "assistant", url)
 
     else:
-        user_model = model_management[user_id]
         if text.startswith(f"!"):
             text_split = text.split()
             shortcut_keyword = text_split[0][1:].lower()
@@ -213,7 +210,7 @@ def process_text_message(user_id, message):
                     + " "
                     + " ".join(text_split[1:])
                 )
-        memory.append(user_id, "user", text)
+        memory.append_storage(user_id, "user", text)
         url = website.get_url_from_text(text)
         if url:
             if youtube.retrieve_video_id(text):
@@ -225,7 +222,7 @@ def process_text_message(user_id, message):
                 if not is_successful:
                     raise Exception(error_message)
                 youtube_transcript_reader = YoutubeTranscriptReader(
-                    user_model, os.getenv("OPENAI_MODEL_ENGINE")
+                    model, os.getenv("OPENAI_MODEL_ENGINE")
                 )
                 (
                     is_successful,
@@ -240,9 +237,7 @@ def process_text_message(user_id, message):
                 chunks = website.get_content_from_url(url)
                 if len(chunks) == 0:
                     raise Exception("無法撈取此網站文字")
-                website_reader = WebsiteReader(
-                    user_model, os.getenv("OPENAI_MODEL_ENGINE")
-                )
+                website_reader = WebsiteReader(model, os.getenv("OPENAI_MODEL_ENGINE"))
                 is_successful, response, error_message = website_reader.summarize(
                     chunks
                 )
@@ -251,14 +246,14 @@ def process_text_message(user_id, message):
                 role, response = get_role_and_content(response)
                 msg = TextSendMessage(text=response)
         else:
-            is_successful, response, error_message = user_model.chat_completions(
-                memory.get(user_id), os.getenv("OPENAI_MODEL_ENGINE")
+            is_successful, response, error_message = model.chat_completions(
+                memory.get_storage(user_id), os.getenv("OPENAI_MODEL_ENGINE")
             )
             if not is_successful:
                 raise Exception(error_message)
             role, response = get_role_and_content(response)
             msg = TextSendMessage(text=response)
-        memory.append(user_id, role, response)
+        memory.append_storage(user_id, role, response)
     return msg
 
 
@@ -330,15 +325,4 @@ def home():
 
 
 if __name__ == "__main__":
-    if os.getenv("USE_MONGO"):
-        mongodb.connect_to_database()
-        storage = Storage(MongoStorage(mongodb.db))
-    else:
-        storage = Storage(FileStorage("db.json"))
-    try:
-        data = storage.load()
-        for user_id in data.keys():
-            model_management[user_id] = OpenAIModel(api_key=data[user_id])
-    except FileNotFoundError:
-        pass
     app.run(host="0.0.0.0", port=8080)
