@@ -23,15 +23,20 @@ class Memory(MemoryInterface):
         self.system_messages = defaultdict(str)
         self.shortcut_keywords = defaultdict(lambda: defaultdict(str))
 
-
     def _initialize(self, user_id: str):
-        self.storage[user_id] = [{
-            'role': 'system', 'content': self.system_messages.get(user_id) or self.default_system_message
-        }]
+        self.storage[user_id] = [
+            {
+                "role": "system",
+                "content": self.system_messages.get(user_id)
+                or self.default_system_message,
+            }
+        ]
 
     def _drop_message(self, user_id: str):
         if len(self.storage.get(user_id)) >= (self.memory_message_count + 1) * 2 + 1:
-            return [self.storage[user_id][0]] + self.storage[user_id][-(self.memory_message_count * 2):]
+            return [self.storage[user_id][0]] + self.storage[user_id][
+                -(self.memory_message_count * 2) :
+            ]
         return self.storage.get(user_id)
 
     def change_system_message(self, user_id, system_message):
@@ -41,10 +46,7 @@ class Memory(MemoryInterface):
     def append(self, user_id: str, role: str, content: str) -> None:
         if self.storage[user_id] == []:
             self._initialize(user_id)
-        self.storage[user_id].append({
-            'role': role,
-            'content': content
-        })
+        self.storage[user_id].append({"role": role, "content": content})
         logger.debug(f"memory length: {len(self.storage[user_id])}")
         self._drop_message(user_id)
         logger.debug(f"memory length after dropping: {len(self.storage[user_id])}")
