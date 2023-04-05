@@ -15,12 +15,13 @@ import os
 import uuid
 import noisereduce as nr
 import pydub
+import time
 from scipy.io import wavfile
 
 from src.models import OpenAIModel
 from src.memory import Memory
 from src.logger import logger
-from src.utils import get_role_and_content
+from src.utils import get_role_and_content, verify_file_preparation_status
 from src.service.youtube import Youtube, YoutubeTranscriptReader
 from src.service.website import Website, WebsiteReader
 from src.mongodb import mongodb
@@ -66,16 +67,22 @@ class MessageEventHandler:
         line_bot_api.reply_message(reply_token, msg)
 
 
-def process_audio_message(user_id, message):
+def process_audio_message(user_id, message, ext=".m4a"):
     model = OpenAIModel(api_key=memory.get_api_key(user_id))
+
+    # wait for file preparation
+    while verify_file_preparation_status(message.id) is False:
+        time.sleep(3)
+
     audio_content = line_bot_api.get_message_content(message.id)
-    input_audio_path = f"{str(uuid.uuid4())}.m4a"
+    input_audio_path = f"{str(uuid.uuid4())}{ext}"
+    logger.info(f"Audio file path: {input_audio_path}")
     with open(input_audio_path, "wb") as fd:
         for chunk in audio_content.iter_content():
             fd.write(chunk)
 
     # perform noise reduction
-    wav_file = pydub.AudioSegment.from_file(input_audio_path)
+    wav_file = pydub.AudioSegment.from_file_using_temporary_files(input_audio_path)
     wav_path = f"{str(uuid.uuid4())}.wav"
     # Convert to WAV format
     wav_file.export(wav_path, format="wav")
@@ -261,8 +268,9 @@ def process_file_message(user_id, message):
     audio_types = (".mp4", ".mpeg", ".mp3", ".wav", ".m4a", ".wma")
     file_name = message.file_name
     file_size = message.file_size
-    if os.path.splitext(file_name)[-1] in audio_types:
-        msg = process_audio_message(user_id, message)
+    ext = os.path.splitext(file_name)[-1]
+    if ext in audio_types:
+        msg = process_audio_message(user_id, message, ext)
     elif file_size > 25000000:  # lager than 25MB
         msg = TextSendMessage(text="檔案太大，目前僅支援 25MB 以下的檔案")
     else:
