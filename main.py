@@ -70,16 +70,26 @@ class MessageEventHandler:
 def process_audio_message(user_id, message, ext=".m4a"):
     model = OpenAIModel(api_key=memory.get_api_key(user_id))
 
-    # wait for file preparation
-    while verify_file_preparation_status(message.id) is False:
-        time.sleep(3)
-
-    audio_content = line_bot_api.get_message_content(message.id)
     input_audio_path = f"{str(uuid.uuid4())}{ext}"
     logger.info(f"Audio file path: {input_audio_path}")
-    with open(input_audio_path, "wb") as fd:
-        for chunk in audio_content.iter_content():
-            fd.write(chunk)
+    retry = 0
+    # retry if file is not ready
+    while (
+        not (
+            os.path.exists(input_audio_path) and os.path.getsize(input_audio_path) != 0
+        )
+        and retry < 20
+    ):
+        audio_content = line_bot_api.get_message_content(message.id)
+        with open(input_audio_path, "wb") as fd:
+            for chunk in audio_content.iter_content():
+                fd.write(chunk)
+        time.sleep(3)
+        retry += 1
+    if os.path.getsize(input_audio_path) == 0:
+        raise RuntimeError(
+            "File preparation failed. Please reduce the file size and try again."
+        )
 
     # perform noise reduction
     wav_file = pydub.AudioSegment.from_file_using_temporary_files(input_audio_path)
