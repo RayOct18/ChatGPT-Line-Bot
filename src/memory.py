@@ -19,7 +19,7 @@ class Memory(MemoryInterface):
     def __init__(self, db):
         self.db = db
         self.default_system_message = os.getenv("SYSTEM_MESSAGE")
-        self.memory_message_count = int(os.getenv("MAX_MESSAGE_LIMIT", 5))
+        self.default_memory_message_count = 2
 
     def _initialize(self, user_id: str):
         return {
@@ -27,9 +27,10 @@ class Memory(MemoryInterface):
             "content": self.get_system_message(user_id) or self.default_system_message,
         }
 
-    def _drop_message(self, storage):
-        if len(storage) >= self.memory_message_count:
-            return [storage[0]] + storage[-self.memory_message_count :]
+    def _drop_message(self, user_id, storage):
+        memory_message_count = self.get_memory_message_count(user_id)
+        if len(storage) >= memory_message_count + 1:
+            return [storage[0]] + storage[-memory_message_count:]
         return storage
 
     def add_api_key(self, user_id, api_key):
@@ -47,15 +48,26 @@ class Memory(MemoryInterface):
             self.db.find_one(user_id, "system_message") or self.default_system_message
         )
 
+    def change_memory_message_count(self, user_id, memory_message_count):
+        self.db.upsert(user_id, "memory_message_count", memory_message_count)
+        storage = self._drop_message(user_id, self.get_storage(user_id))
+        self.db.upsert(user_id, "storage", storage)
+
+    def get_memory_message_count(self, user_id):
+        return (
+            self.db.find_one(user_id, "memory_message_count")
+            or self.default_memory_message_count
+        )
+
     def append_storage(self, user_id: str, role: str, content: str) -> None:
         storage = self.get_storage(user_id)
         if not storage:
             storage.append(self._initialize(user_id))
         storage.append({"role": role, "content": content})
         logger.debug(f"memory length: {len(storage)}")
-        storage = self._drop_message(storage)
+        storage = self._drop_message(user_id, storage)
         logger.debug(
-            f"memory length after dropping (max: {self.memory_message_count}): {len(storage)}"
+            f"memory length after dropping (max: {self.get_memory_message_count(user_id)}): {len(storage)}"
         )
         self.db.upsert(user_id, "storage", storage)
 

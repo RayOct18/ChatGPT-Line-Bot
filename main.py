@@ -149,6 +149,15 @@ def process_text_message(user_id, message):
         else:
             msg = TextSendMessage(text="尚未註冊")
 
+    elif text.startswith("/目前記憶數量"):
+        memory_message_count = memory.get_memory_message_count(user_id)
+        msg = TextSendMessage(text=f"目前會記憶前 {memory_message_count} 則訊息")
+
+    elif text.startswith("/設定記憶數量"):
+        count = int(text.strip().split()[-1])
+        memory.change_memory_message_count(user_id, count)
+        msg = TextSendMessage(text=f"設定成功，目前會記憶前 {count} 則訊息")
+
     elif text.startswith("/指令說明") or text.startswith("/help"):
         msg = TextSendMessage(
             text="指令：\n/註冊 + API Token\n👉 API Token 請先到 https://platform.openai.com/ 註冊登入後取得\n"
@@ -162,6 +171,8 @@ def process_text_message(user_id, message):
             + "\n/get_keyword\n👉 取得所有快捷關鍵字內容\n"
             + "\n/add_keyword + key content\n👉 新增快捷關鍵字內容，之後內容開頭如果是關鍵字，則自動帶入對應的內容\n"
             + "\n/remove_keyword + key\n👉 刪除快捷關鍵字\n"
+            + "\n/目前記憶數量\n👉 顯示目前會記憶前幾則訊息\n"
+            + "\n/設定記憶數量 + 數字\n👉 設定目前會記憶前幾則訊息\n"
         )
 
     elif text.startswith("/系統訊息"):
