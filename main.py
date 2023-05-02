@@ -115,7 +115,9 @@ def process_audio_message(user_id, message, ext=".m4a"):
 
     if el_model.get_tts(user_id):
         el_api = ElevenLabs(api_key=el_model.get_api_key(user_id))
-        response = el_api.generate(response, "Adam", f"static/{str(uuid.uuid4())}.mp3")
+        response = el_api.generate(
+            response, "Adam", f"{os.getenv('STATIC_FOLDER')}/{str(uuid.uuid4())}.mp3"
+        )
         msg.append(
             AudioSendMessage(
                 original_content_url=f"https://{os.getenv('DOMAIN_NAME')}/files/{response['filename']}",
@@ -253,7 +255,9 @@ def process_text_message(user_id, message):
         if el_model.get_tts(user_id):
             el_api = ElevenLabs(api_key=el_model.get_api_key(user_id))
             response = el_api.generate(
-                response, "Adam", f"static/{str(uuid.uuid4())}.mp3"
+                response,
+                "Adam",
+                f"{os.getenv('STATIC_FOLDER')}/{str(uuid.uuid4())}.mp3",
             )
             msg.append(
                 AudioSendMessage(
