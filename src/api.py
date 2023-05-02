@@ -1,22 +1,10 @@
-from typing import List, Dict
+import os
 import requests
+import pydub
+from elevenlabs import voices, generate, save
 
 
-class ModelInterface:
-    def check_token_valid(self) -> bool:
-        pass
-
-    def chat_completions(self, messages: List[Dict], model_engine: str) -> str:
-        pass
-
-    def audio_transcriptions(self, file, model_engine: str) -> str:
-        pass
-
-    def image_generations(self, prompt: str) -> str:
-        pass
-
-
-class OpenAIModel(ModelInterface):
+class OpenAI:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://api.openai.com/v1"
@@ -59,3 +47,31 @@ class OpenAIModel(ModelInterface):
     def image_generations(self, prompt: str) -> str:
         json_body = {"prompt": prompt, "n": 1, "size": "512x512"}
         return self._request("POST", "/images/generations", body=json_body)
+
+
+class ElevenLabs:
+    """
+    text to speech api
+    https://beta.elevenlabs.io/speech-synthesis
+    """
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    def generate(self, text: str, voice: str, filename: str):
+        audio = generate(
+            text=text,
+            api_key=self.api_key,
+            voice=voice,
+        )
+
+        save(audio, filename)
+        return {
+            "filename": os.path.basename(filename),
+            "duration": len(pydub.AudioSegment.from_mp3(filename)),
+        }
+
+    def voice_list(self):
+        voice_list = voices(api_key=self.api_key)
+        names = [voice.name for voice in voice_list]
+        return names

@@ -1,6 +1,8 @@
 import os
 import opencc
-import requests
+import pydub
+import noisereduce as nr
+from scipy.io import wavfile
 
 s2t_converter = opencc.OpenCC("s2t")
 t2s_converter = opencc.OpenCC("t2s")
@@ -13,16 +15,14 @@ def get_role_and_content(response: str):
     return role, content
 
 
-def verify_file_preparation_status(messageId):
-    """
-    Check if the file is ready to be downloaded.
-    https://developers.line.biz/en/reference/messaging-api/#verify-video-or-audio-preparation-status
-    """
-    url = f"https://api-data.line.me/v2/bot/message/{messageId}/content/transcoding"
-    headers = {"Authorization": f"Bearer {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')}"}
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-    if r.status_code != 200 or r.json()["status"] == "failed":
-        raise Exception(f"File preparation failed. {r.json()}")
-    status = r.json()["status"]
-    return True if status == "succeeded" else False
+def reduce_audio_noise(input_audio_path: str):
+    # perform noise reduction
+    wav_file = pydub.AudioSegment.from_file_using_temporary_files(input_audio_path)
+    filename = os.path.splitext(input_audio_path)[0]
+    wav_path = f"{filename}.wav"
+    # Convert to WAV format
+    wav_file.export(wav_path, format="wav")
+    rate, data = wavfile.read(wav_path)
+    reduced_noise = nr.reduce_noise(y=data, sr=rate, stationary=True)
+    wavfile.write(wav_path, rate, reduced_noise)
+    return wav_path

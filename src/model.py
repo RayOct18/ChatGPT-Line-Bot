@@ -1,25 +1,12 @@
 import os
-from typing import Dict
-from collections import defaultdict
 from src.logger import logger
 
 
-class MemoryInterface:
-    def append_storage(self, user_id: str, message: Dict) -> None:
-        pass
-
-    def get_storage(self, user_id: str) -> str:
-        return ""
-
-    def clean_storage(self, user_id: str) -> None:
-        pass
-
-
-class Memory(MemoryInterface):
+class OpenAIModel:
     def __init__(self, db):
         self.db = db
         self.default_system_message = os.getenv("SYSTEM_MESSAGE")
-        self.default_memory_message_count = 2
+        self.default_memory_message_count = os.getenv("MEMORY_MESSAGE_COUNT", 5)
 
     def _initialize(self, user_id: str):
         return {
@@ -34,10 +21,13 @@ class Memory(MemoryInterface):
         return storage
 
     def add_api_key(self, user_id, api_key):
-        self.db.upsert(user_id, "api_key", api_key)
+        self.db.upsert(user_id, "openai_api_key", api_key)
 
     def get_api_key(self, user_id):
-        return self.db.find_one(user_id, "api_key")
+        api_key = self.db.find_one(user_id, "openai_api_key")
+        if not api_key:
+            raise KeyError("請先註冊 Token，格式為 /註冊OpenAI sk-xxxxx")
+        return api_key
 
     def change_system_message(self, user_id, system_message):
         self.db.upsert(user_id, "system_message", system_message)
@@ -54,7 +44,7 @@ class Memory(MemoryInterface):
         self.db.upsert(user_id, "storage", storage)
 
     def get_memory_message_count(self, user_id):
-        return (
+        return int(
             self.db.find_one(user_id, "memory_message_count")
             or self.default_memory_message_count
         )
@@ -82,3 +72,33 @@ class Memory(MemoryInterface):
 
     def change_shortcut_keywords(self, user_id, shortcut_keywords):
         self.db.upsert(user_id, "shortcut_keywords", shortcut_keywords)
+
+
+class ElevenLabsModel:
+    def __init__(self, db):
+        self.db = db
+        self.default_voice = os.getenv("VOICE")
+
+    def add_api_key(self, user_id, api_key):
+        self.db.upsert(user_id, "elevenlabs_api_key", api_key)
+
+    def get_api_key(self, user_id):
+        api_key = self.db.find_one(user_id, "elevenlabs_api_key")
+        if not api_key:
+            raise KeyError("請先註冊 Token，格式為 /註冊ElevenLabs ***")
+        return api_key
+
+    def get_voice(self, user_id):
+        return self.db.find_one(user_id, "voice") or self.default_voice
+
+    def change_voice(self, user_id, voice):
+        self.db.upsert(user_id, "voice", voice)
+
+    def enable_tts(self, user_id):
+        self.db.upsert(user_id, "enable_text_to_speech", True)
+
+    def disable_tts(self, user_id):
+        self.db.upsert(user_id, "enable_text_to_speech", False)
+
+    def get_tts(self, user_id):
+        return self.db.find_one(user_id, "enable_text_to_speech") or False

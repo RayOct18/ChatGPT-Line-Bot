@@ -36,7 +36,7 @@ def event_middleware(func):
             # If the event is a message event, the message type can be text or audio.
             id = get_event_id(event)
             message = event.message
-            if event.message.type in ("text", "audio", "file"):
+            if event.message.type in ("text", "audio"):
                 return func(reply_token, id, message)
             else:
                 raise RuntimeError(f"Unsupported message type {event.message.type}")
