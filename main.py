@@ -130,6 +130,7 @@ def process_audio_message(user_id, message, ext=".m4a"):
 
 def process_text_message(user_id, message):
     from src.menu import menu
+
     text = message.text.strip()
     logger.info(f"{user_id}: {text}")
     if text == "/首次使用":
